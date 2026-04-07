@@ -294,6 +294,7 @@ class RenderWithColorField(torch.nn.Module):
         with torch.no_grad():
             faces_mask = is_in_view_frustum(self.mesh.verts, viewpoint_cam)[self.mesh.faces].any(axis=1)
         mesh_culled = Meshes(verts=self.mesh.verts, faces=self.mesh.faces[faces_mask])
+        # mesh_culled = Meshes(verts=self.mesh.verts, faces=self.mesh.faces)
         if mesh_culled.faces.shape[0] < min_number_of_faces:
             return None
         try:

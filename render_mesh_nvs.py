@@ -51,7 +51,6 @@ def train_color_field(
     # Initialize the render with color field
     render_with_color_field = RenderWithColorField(mesh, color_field_type, camera_extent)
     lr_factor = 0.1 ** (1 / iterations)
-
     viewpoint_stack = None
     print(f"[INFO] Training color field for {iterations} iterations")
     progress_bar = tqdm(range(iterations + 1), desc="Training color field", leave=True)
