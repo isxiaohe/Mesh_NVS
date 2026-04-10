@@ -22,6 +22,8 @@ from scene.dataset_readers import sceneLoadTypeCallbacks
 from utils.general_utils import safe_state
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 
+faces_dict = {}
+
 def train_color_field(
     ply_file: str,
     train_cameras: list,
@@ -42,6 +44,7 @@ def train_color_field(
         RenderWithColorField: The trained render with color field object.
     """
     # Load the mesh from the PLY file
+    
     mesh = get_mesh_from_ply(ply_file)
 
     # Set up the mesh renderer
@@ -67,9 +70,9 @@ def train_color_field(
         viewpoint_cam = viewpoint_stack.pop(random_view_idx)
         
         # Render the mesh
-        mesh_color = render_with_color_field(viewpoint_idx, viewpoint_cam, mesh_renderer)
+        mesh_color = render_with_color_field(viewpoint_idx, viewpoint_cam, mesh_renderer, faces_dict=faces_dict)
         if mesh_color is None:
-            print(f"[WARNING] Mesh is empty after culling. Skipping iteration {iteration}")
+            print(f"[WARNING] Mesh is empty after culling. Skipping iteration {iteration}. Image Name: {viewpoint_cam.image_name}")
             continue
         # Compute the loss
         gt_image = viewpoint_cam.original_image.cuda()
@@ -103,14 +106,21 @@ def render_set(output_path, name, views, render_with_color_field):
     if not views:
         return
     
+    skipped_image_name = ()
+    
     # Set up the mesh renderer
     mesh_renderer = MeshRenderer(MeshRasterizer(cameras=views))
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         rendering = render_with_color_field(idx, view, mesh_renderer, training=False)
+        if rendering is None:
+            print(f"[WARNING] Mesh is empty after culling. Skipping rendering for image {view.image_name}")
+            skipped_image_name += (view.image_name,)
+            continue
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+    return skipped_image_name
 
 def render_sets(train_cameras, test_cameras, output_path, skip_train : bool, skip_test : bool, render_with_color_field : RenderWithColorField, prefix_dir : str = "mesh"):
     with torch.no_grad():
@@ -119,7 +129,7 @@ def render_sets(train_cameras, test_cameras, output_path, skip_train : bool, ski
              render_set(output_path, f"{prefix_dir}/train", train_cameras, render_with_color_field)
 
         if not skip_test:
-             render_set(output_path, f"{prefix_dir}/test", test_cameras, render_with_color_field)
+            return render_set(output_path, f"{prefix_dir}/test", test_cameras, render_with_color_field)
 
 if __name__ == "__main__":
     # Set up command line argument parser
@@ -138,7 +148,7 @@ if __name__ == "__main__":
     output_path = args.output_path if args.output_path else os.path.join(os.path.dirname(args.ply_file), "mesh_nvs_fixed")
     print(f"[INFO] Rendering " + args.ply_file)
     print(f"[INFO] Output path: {output_path}")
-
+    # breakpoint()
     # Instantiate scene
     if os.path.exists(os.path.join(args.source_path, "sparse")):
         scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, "images", True)
@@ -160,11 +170,21 @@ if __name__ == "__main__":
                                                 train_cameras=train_cameras, 
                                                 camera_extent=cameras_extent)
 
-    
 
-    render_sets(train_cameras=train_cameras, 
+    import json
+    os.makedirs(os.path.join(output_path, "mesh"), exist_ok=True)
+    with open(os.path.join(output_path, "mesh", "faces_dict.json"), "w") as f:
+        json.dump(faces_dict, f)
+    breakpoint()
+    skipped_image_names = render_sets(train_cameras=train_cameras, 
                 test_cameras=test_cameras, 
                 output_path=output_path, 
                 skip_train=args.skip_train, 
                 skip_test=args.skip_test, 
                 render_with_color_field=render_with_color_field)
+
+    if skipped_image_names:
+        print(f"[WARNING] The following images were skipped during rendering due to empty mesh after culling: {skipped_image_names}")
+        # save
+        with open(os.path.join(output_path, "mesh", "skipped_images.json"), "w") as f:
+            json.dump(skipped_image_names, f)

@@ -289,13 +289,16 @@ class RenderWithColorField(torch.nn.Module):
         self.color_field = color_field
         self.optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
-    def forward(self, viewpoint_idx : int, viewpoint_cam : any, mesh_renderer : MeshRenderer, training : bool = True, n_random_points : int = -1, min_number_of_faces : int = 50) -> torch.Tensor:
+    def forward(self, viewpoint_idx : int, viewpoint_cam : any, mesh_renderer : MeshRenderer, training : bool = True, n_random_points : int = -1, min_number_of_faces : int = 50, faces_dict=None) -> torch.Tensor:
         # Filter out faces not in view frustum
         with torch.no_grad():
             faces_mask = is_in_view_frustum(self.mesh.verts, viewpoint_cam)[self.mesh.faces].any(axis=1)
         mesh_culled = Meshes(verts=self.mesh.verts, faces=self.mesh.faces[faces_mask])
         # mesh_culled = Meshes(verts=self.mesh.verts, faces=self.mesh.faces)
+        if faces_dict is not None and viewpoint_cam.image_name not in faces_dict:
+            faces_dict[viewpoint_cam.image_name] = mesh_culled.faces.shape[0]
         if mesh_culled.faces.shape[0] < min_number_of_faces:
+            # breakpoint()
             return None
         try:
             mesh_render_pkg = mesh_renderer(
@@ -304,7 +307,7 @@ class RenderWithColorField(torch.nn.Module):
                     return_depth=True,
                     return_normals=True
             )
-        except:
+        except Exception as e:
             return None
         mesh_depth = mesh_render_pkg["depth"].squeeze()
         mesh_normal = mesh_render_pkg["normals"].squeeze()
