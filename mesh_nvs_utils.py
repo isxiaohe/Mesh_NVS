@@ -24,12 +24,13 @@ Mesh Utils
 def get_mesh_from_ply(ply_file: str) -> Meshes:
     """
     Loads a mesh from a PLY file and converts it to a our Mesh object.
+    Also loads vertex colors if available in the PLY file.
 
     Args:
         ply_file (str): The path to the PLY file containing the mesh data.
 
     Returns:
-        Meshes: A Meshes object containing the vertices and faces of the mesh.
+        Meshes: A Meshes object containing the vertices, faces, and optionally vertex colors of the mesh.
     """
     print(f"[INFO] Loading mesh from {ply_file}")
     mesh_data = trimesh.load(ply_file)
@@ -37,7 +38,21 @@ def get_mesh_from_ply(ply_file: str) -> Meshes:
     # Convert vertices and faces to PyTorch tensors on GPU
     verts = torch.tensor(mesh_data.vertices, dtype=torch.float32, device="cuda")
     faces = torch.tensor(mesh_data.faces, dtype=torch.int32, device="cuda")
-    mesh = Meshes(verts=verts, faces=faces)
+
+    # Load vertex colors if available
+    verts_colors = None
+    if hasattr(mesh_data, 'visual') and hasattr(mesh_data.visual, 'vertex_colors'):
+        # trimesh loads colors as [0-255] uint8, convert to [0-1] float
+        verts_colors = torch.tensor(
+            mesh_data.visual.vertex_colors[:, :3],  # Take only RGB, ignore alpha
+            dtype=torch.float32,
+            device="cuda"
+        ) / 255.0
+        print(f"[INFO] Loaded vertex colors: {verts_colors.shape}")
+    else:
+        print(f"[WARNING] No vertex colors found in {ply_file}")
+
+    mesh = Meshes(verts=verts, faces=faces, verts_colors=verts_colors)
     return mesh
 
 def depths_to_points_and_rays_d(view, depthmap1):
@@ -312,11 +327,89 @@ class RenderWithColorField(torch.nn.Module):
         mesh_depth = mesh_render_pkg["depth"].squeeze()
         mesh_normal = mesh_render_pkg["normals"].squeeze()
 
-        mesh_color = map_depth_and_normal_to_color(depth_map=mesh_depth, 
-                                        normal_map=mesh_normal, 
-                                        color_field=self.color_field, 
-                                        camera_view=viewpoint_cam, 
+        mesh_color = map_depth_and_normal_to_color(depth_map=mesh_depth,
+                                        normal_map=mesh_normal,
+                                        color_field=self.color_field,
+                                        camera_view=viewpoint_cam,
                                         show_progress=False,
                                         chunk_size=500_000,
                                         max_random_points= n_random_points if training else -1)
         return mesh_color
+
+
+class RenderWithMeshColors(torch.nn.Module):
+    """
+    Render mesh directly using vertex colors without neural color field.
+    This is faster than training a neural color field but uses the mesh's
+    original colors without view-dependent effects.
+    """
+    def __init__(self, mesh: Meshes):
+        super(RenderWithMeshColors, self).__init__()
+        self.mesh = mesh
+
+    def forward(
+        self,
+        viewpoint_idx: int,
+        viewpoint_cam: any,
+        mesh_renderer: MeshRenderer,
+        training: bool = True,
+        n_random_points: int = -1,
+        min_number_of_faces: int = 50,
+        faces_dict=None
+    ) -> torch.Tensor:
+        """
+        Render mesh using vertex colors directly.
+
+        Args:
+            viewpoint_idx: Viewpoint index
+            viewpoint_cam: Camera object
+            mesh_renderer: Mesh renderer instance
+            training: Whether in training mode (unused, for compatibility)
+            n_random_points: Random sampling (unused, for compatibility)
+            min_number_of_faces: Minimum faces threshold
+            faces_dict: Dictionary to store face counts
+
+        Returns:
+            Rendered color image (3, H, W) or None if mesh is empty
+        """
+        # Check if mesh has vertex colors
+        if self.mesh.verts_colors is None:
+            raise ValueError(
+                "Mesh does not have vertex colors. "
+                "Please use a PLY file with vertex colors or use RenderWithColorField instead."
+            )
+
+        # Filter out faces not in view frustum
+        with torch.no_grad():
+            faces_mask = is_in_view_frustum(self.mesh.verts, viewpoint_cam)[self.mesh.faces].any(axis=1)
+        mesh_culled = Meshes(
+            verts=self.mesh.verts,
+            faces=self.mesh.faces[faces_mask],
+            verts_colors=self.mesh.verts_colors  # Preserve vertex colors
+        )
+
+        # Store face count for debugging
+        if faces_dict is not None and viewpoint_cam.image_name not in faces_dict:
+            faces_dict[viewpoint_cam.image_name] = mesh_culled.faces.shape[0]
+
+        # Check if enough faces remain after culling
+        if mesh_culled.faces.shape[0] < min_number_of_faces:
+            return None
+
+        try:
+            # Render mesh with vertex colors
+            mesh_render_pkg = mesh_renderer(
+                mesh_culled,
+                cam_idx=viewpoint_idx,
+                return_depth=True,
+                return_normals=True
+            )
+        except Exception as e:
+            print(f"[ERROR] Rendering failed: {e}")
+            return None
+
+        # Extract RGB image (1, H, W, 3) -> (3, H, W)
+        mesh_color = mesh_render_pkg["rgb"].squeeze(0).permute(2, 0, 1)
+        mesh_depth = mesh_render_pkg["depth"].squeeze().detach() if "depth" in mesh_render_pkg else None
+        mesh_normal = mesh_render_pkg["normals"].squeeze().detach().permute(2, 0, 1) if "normals" in mesh_render_pkg else None
+        return mesh_color, mesh_depth, mesh_normal

@@ -1,3 +1,9 @@
 [submodule "submodules/nvdiffrast"]
 	path = submodules/nvdiffrast
 	url = git@github.com:NVlabs/nvdiffrast.git
+[submodule "submodules/InfiniDepth"]
+	path = submodules/InfiniDepth
+	url = git@github.com:zju3dv/InfiniDepth.git
+[submodule "submodules/StableNormal"]
+	path = submodules/StableNormal
+	url = git@github.com:Stable-X/StableNormal.git

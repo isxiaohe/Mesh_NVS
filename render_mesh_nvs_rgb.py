@@ -122,29 +122,29 @@ def render_set(output_path, name, views, render_with_color_field):
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
-        # save original depth and normal if available
-        if depth is not None:
-            # save as np
-            np.save(os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.npy"), depth.cpu().numpy())
-        if normal is not None:
-            # save as np
-            np.save(os.path.join(render_path, '{0:05d}'.format(idx) + "_normal.npy"), normal.cpu().numpy())
+        # # save original depth and normal if available
+        # if depth is not None:
+        #     # save as np
+        #     np.save(os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.npy"), depth.cpu().numpy())
+        # if normal is not None:
+        #     # save as np
+        #     np.save(os.path.join(render_path, '{0:05d}'.format(idx) + "_normal.npy"), normal.cpu().numpy())
 
-        # visualize depth and normal if available
-        # use plasma
-        # depth H * W
-        # normal 3 * H * W
-        if depth is not None:
-            depth_vis = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
-            depth_vis = cv2.applyColorMap((depth_vis.cpu().numpy() * 255).astype(np.uint8), cv2.COLORMAP_PLASMA)
-            cv2.imwrite(os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"), depth_vis)
-        if normal is not None:
-            # normalize normal to [0, 1]
-            normal_vis = (normal + 1) / 2
-            # 转换维度：(3, H, W) -> (H, W, 3) 并转换为 uint8
-            normal_vis = (normal_vis.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
-            normal_vis = cv2.cvtColor(normal_vis, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(os.path.join(render_path, '{0:05d}'.format(idx) + "_normal.png"), normal_vis)
+        # # visualize depth and normal if available
+        # # use plasma
+        # # depth H * W
+        # # normal 3 * H * W
+        # if depth is not None:
+        #     depth_vis = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
+        #     depth_vis = cv2.applyColorMap((depth_vis.cpu().numpy() * 255).astype(np.uint8), cv2.COLORMAP_PLASMA)
+        #     cv2.imwrite(os.path.join(render_path, '{0:05d}'.format(idx) + "_depth.png"), depth_vis)
+        # if normal is not None:
+        #     # normalize normal to [0, 1]
+        #     normal_vis = (normal + 1) / 2
+        #     # 转换维度：(3, H, W) -> (H, W, 3) 并转换为 uint8
+        #     normal_vis = (normal_vis.cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
+        #     normal_vis = cv2.cvtColor(normal_vis, cv2.COLOR_RGB2BGR)
+        #     cv2.imwrite(os.path.join(render_path, '{0:05d}'.format(idx) + "_normal.png"), normal_vis)
         
     return skipped_image_name
 
